@@ -52,7 +52,7 @@ class SparseConvBlock(nn.Module):
                f"bn={self.is_batch_norm}, " \
                f"gate={self.gate})"
 
-    def do_pruning(self, in_channel_mask: np.ndarray, pruner: Callable[[np.ndarray], float], prune_mode: str):
+    def do_pruning(self, in_channel_mask: np.ndarray, pruner: Callable[[np.ndarray], float], prune_mode: str, prune_on: str):
         if not self.gate and not self.is_batch_norm:
             raise ValueError("No sparse layer in the block.")
 
@@ -62,7 +62,8 @@ class SparseConvBlock(nn.Module):
                                                in_channel_mask=in_channel_mask,
                                                pruner=pruner,
                                                prune_output_mode="prune",
-                                               prune_mode=prune_mode)
+                                               prune_mode=prune_mode, 
+                                               prune_on=prune_on)
 
         return out_channel_mask
         pass
@@ -240,13 +241,13 @@ class LeNet5(nn.Module):
                 m.weight.data.normal_(0, 0.01)
                 m.bias.data.zero_()
 
-    def prune_model(self, pruner: Callable[[np.ndarray], float], prune_mode: str) -> None:
+    def prune_model(self, pruner: Callable[[np.ndarray], float], prune_mode: str, prune_on: str) -> None:
         input_mask = np.ones(1)
         for submodule in self.modules():
             if isinstance(submodule, SparseConvBlock):
                 submodule: SparseConvBlock
                 print(input_mask)
-                input_mask = submodule.do_pruning(in_channel_mask=input_mask, pruner=pruner, prune_mode=prune_mode)
+                input_mask = submodule.do_pruning(in_channel_mask=input_mask, pruner=pruner, prune_mode=prune_mode, prune_on=prune_on)
 
         input_mask_linear = []
         for i in input_mask: 

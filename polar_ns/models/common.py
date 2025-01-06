@@ -203,19 +203,40 @@ def prune_conv_layer(conv_layer: Union[nn.Conv2d, nn.Linear],
 
         # prune the input channel of the conv layer
         # if sparse_layer_in and in_channel_mask are both None, the input dim will NOT be pruned
+        # if sparse_layer_in is not None:
+        #     if in_channel_mask is not None:
+        #         raise ValueError("")
+        #     sparse_weight_in: np.ndarray = sparse_layer_in.weight.view(-1).data.cpu().numpy()
+        #     # the in_channel_mask will be overwrote
+        #     input_threshold = pruner(sparse_weight_in)
+        #     in_channel_mask: np.ndarray = sparse_weight_in > input_threshold
+
+        # # convert mask to channel indexes
+        # idx_in = np.squeeze(np.argwhere(np.asarray(in_channel_mask)))
+        # if len(idx_in.shape) == 0:
+        #     # expand the single scalar to array
+        #     idx_in = np.expand_dims(idx_in, 0)
+        
+        # prune the input channel of the conv layer
+        # if sparse_layer_in and in_channel_mask are both None, the input dim will NOT be pruned
         if sparse_layer_in is not None:
             if in_channel_mask is not None:
                 raise ValueError("")
             sparse_weight_in: np.ndarray = sparse_layer_in.weight.view(-1).data.cpu().numpy()
             # the in_channel_mask will be overwrote
-            input_threshold = pruner(sparse_weight_in)
-            in_channel_mask: np.ndarray = sparse_weight_in > input_threshold
+            in_channel_mask = pruner(sparse_weight_in)
 
-        # convert mask to channel indexes
-        idx_in = np.squeeze(np.argwhere(np.asarray(in_channel_mask)))
-        if len(idx_in.shape) == 0:
-            # expand the single scalar to array
-            idx_in = np.expand_dims(idx_in, 0)
+        if in_channel_mask is not None:
+            # prune the input channel according to the in_channel_mask
+            # convert mask to channel indexes
+            idx_in = np.squeeze(np.argwhere(np.asarray(in_channel_mask)))
+            if len(idx_in.shape) == 0:
+                # expand the single scalar to array
+                idx_in = np.expand_dims(idx_in, 0)
+            elif len(idx_in.shape) == 1 and idx_in.shape[0] == 0:
+                # nothing left, prune the whole block
+                out_channel_mask = np.full(conv_layer.out_channels, False)
+                return in_channel_mask, out_channel_mask
 
         # prune the input of the conv layer
         if isinstance(conv_layer, nn.Conv2d):
@@ -233,6 +254,8 @@ def prune_conv_layer(conv_layer: Union[nn.Conv2d, nn.Linear],
             if prune_on == 'factor':
                 # the sparse_layer.weight need to be flatten, because the weight of SparseGate is not 1d
                 sparse_weight: np.ndarray = sparse_layer.weight.view(-1).data.cpu().numpy()
+                # Use abs. weigths: 
+                sparse_weight = np.abs(sparse_weight)
                 if prune_mode == 'multiply':
                     bn_weight = bn_layer.weight.data.cpu().numpy()
                     sparse_weight = sparse_weight * bn_weight  # element-wise multiplication
@@ -242,6 +265,7 @@ def prune_conv_layer(conv_layer: Union[nn.Conv2d, nn.Linear],
 
                 # prune according the bn layer
                 output_threshold = pruner(sparse_weight)
+                print('output_threshold in pruning: {output_threshold}')
                 out_channel_mask: np.ndarray = sparse_weight > output_threshold
             else:
                 sparse_weight: np.ndarray = sparse_layer.weight.view(-1).data.cpu().numpy()

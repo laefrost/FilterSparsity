@@ -6,9 +6,10 @@ from typing import Any, Dict
 import torch
 
 import  polar_ns.common as common 
-from  polar_ns.models.common import search_threshold
+from polar_ns.models.common import search_threshold, l1_norm_threshold
 from  polar_ns.models.pytorch_lenet5 import LeNet5, lenet5, lenet5_linear
 from torchinfo import summary
+import numpy as np
 
 
 def _get_parser():
@@ -60,7 +61,7 @@ def _check_model_same(model1: torch.nn.Module, model2: torch.nn.Module) -> float
 
 
 def prune(num_classes: int, sparse_model: torch.nn.Module, pruning_strategy: str, sanity_check: bool,
-              prune_mode: str):
+              prune_mode: str, prune_type: str = 'polarization', l1_norm_ratio=None, l1_norm_cutoff = None):
     """
     :param sparse_model: The model trained with sparsity regularization
     :param pruning_strategy: same as `models.common.search_threshold`
@@ -77,8 +78,37 @@ def prune(num_classes: int, sparse_model: torch.nn.Module, pruning_strategy: str
     pruned_model = copy.deepcopy(sparse_model)
     pruned_model.cpu()
     #print(pruned_model)
-    pruned_model.prune_model(pruner=lambda weight: search_threshold(weight, pruning_strategy),
-                             prune_mode=prune_mode)
+    
+    if prune_type == 'polarization':
+        pruner = lambda weight: search_threshold(weight, pruning_strategy)
+        prune_on = 'factor'
+    elif prune_type == 'l1-norm':
+        pruner = lambda weight: l1_norm_threshold(weight, ratio=l1_norm_ratio)
+        prune_on = 'weight'
+    elif prune_type == 'ns':
+        # find the threshold
+        sparse_layers = pruned_model.get_sparse_layers()
+        sparse_weight_concat = np.concatenate([l.weight.data.clone().view(-1).cpu().numpy() for l in sparse_layers])
+        sparse_weight_concat = np.abs(sparse_weight_concat)
+        sparse_weight_concat = np.sort(sparse_weight_concat)
+        thre_index = int(len(sparse_weight_concat) * l1_norm_ratio)
+        threshold = sparse_weight_concat[thre_index]
+        pruner = lambda weight: threshold
+        prune_on = 'factor'
+    # only used for ns and polarization 
+    elif prune_type == 'l1-norm-cutoff': 
+        pruner = lambda weight: l1_norm_cutoff
+        prune_on = 'factor'
+    else:
+        raise ValueError(f"Unsupport prune type: {prune_type}")
+    
+    # pruned_model.prune_model(pruner=lambda weight: search_threshold(weight, pruning_strategy),
+    #                          prune_mode=prune_mode)
+    
+    pruned_model.prune_model(pruner=pruner,
+                             prune_mode=prune_mode,
+                             prune_on=prune_on)
+    
     print("Pruning finished. cfg:")
     print(pruned_model.config())
 
@@ -148,7 +178,9 @@ def main(config):
     saved_model = prune(num_classes=num_classes,
                             sparse_model=sparse_model,
                             pruning_strategy=config.get('pruning_strategy'),
-                            sanity_check=True, prune_mode=config.get('prune_mode'))
+                            sanity_check=True, prune_mode=config.get('prune_mode'), 
+                            prune_type = config.get('pruning_type'), l1_norm_ratio=config.get('l1_norm_ratio'), 
+                            l1_norm_cutoff=config.get('l1_norm_cutoff'))
 
     # compute FLOPs
     baseline_flops = common.compute_conv_flops(lenet5_linear(gate=False))
@@ -162,3 +194,5 @@ def main(config):
     torch.save({'state_dict': saved_model.state_dict(),
                 'cfg': saved_model.config()},
                os.path.join(config.get('save'), f'pruned_{config.get('pruning_strategy')}.pth.tar'))
+    
+    return baseline_flops, saved_flops

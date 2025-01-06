@@ -307,7 +307,10 @@ def fine_tune_model(config):
         writer.add_scalar("train/lr", optimizer.param_groups[0]['lr'], epoch)
         writer.add_scalar("val/acc", prec1, epoch)
         writer.add_scalar("val/best_acc", best_prec1, epoch)
+        writer.close()
+
 
     print("Best accuracy: " + str(best_prec1))
     history_score[-1][0] = best_prec1
     np.savetxt(os.path.join(config.get('save'), 'record.txt'), history_score, fmt='%10.5f', delimiter=',')
+    return best_prec1

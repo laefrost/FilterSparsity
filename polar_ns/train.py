@@ -421,7 +421,7 @@ def fit_model(config):
             'best_prec1': best_prec1,
             'optimizer': optimizer.state_dict(),
         }, is_best, filepath=config.get('save', 'results'),
-            backup_path=config.get('backup_path', 'backup'),
+            backup_path=config.get('backup', 'backup'),
             backup=epoch % config.get('backup_freq', 10) == 0,
             epoch=epoch,
             max_backup=config.get('max_backup', 25), 
@@ -467,4 +467,5 @@ def fit_model(config):
     writer.close()
 
     print("Best accuracy: " + str(best_prec1))    
-    print(model.load_state_dict())
+    #print(model.load_state_dict())
+    return(best_prec1)
