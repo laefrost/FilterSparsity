@@ -45,18 +45,26 @@ def compute_conv_flops(model: torch.nn.Module, cuda=False) -> float:
         batch_size, input_channels, input_height, input_width = input[0].size()
         output_channels, output_height, output_width = output[0].size()
 
-        kernel_ops = self.kernel_size[0] * self.kernel_size[1] * (self.in_channels / self.groups)
+        # kernel_ops = self.kernel_size[0] * self.kernel_size[1] * (self.in_channels / self.groups)
 
-        flops = kernel_ops * output_channels * output_height * output_width
+        # flops = kernel_ops * output_channels * output_height * output_width
+        
+        # Count only non-zero weights
+        nonzero_weight_count = torch.count_nonzero(self.weight).item()
+
+        # Compute FLOPs based on nonzero weights
+        flops = nonzero_weight_count * output_height * output_width
 
         list_conv.append(flops)
 
     list_linear = []
 
     def linear_hook(self, input, output):
-        weight_ops = self.weight.nelement()
+        #weight_ops = self.weight.nelement()
+        nonzero_weight_count = torch.count_nonzero(self.weight).item()
 
-        flops = weight_ops
+        flops = nonzero_weight_count
+        #flops = weight_ops
         list_linear.append(flops)
 
     def add_hooks(net, hook_handles: list):

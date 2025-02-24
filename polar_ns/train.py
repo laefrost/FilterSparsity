@@ -22,10 +22,8 @@ import polar_ns.common
 import polar_ns.models as models 
 from polar_ns.common import LossType, compute_conv_flops
 from polar_ns.models.common import SparseGate, Identity
-from polar_ns.models.pytorch_lenet5 import LeNet5, lenet5_linear, lenet5
+from polar_ns.models.pytorch_lenet5 import LeNet5, lenet5
 from polar_ns.prune import prune
-
-#from models.resnet_expand import BasicBlock
 
 
 def repr_and_saves(seed, cuda = False, log = 'logs', save = 'results', backup_path = 'backup'):
@@ -64,23 +62,14 @@ def get_loaders(batch_size, test_batch_size):
     batch_size=test_batch_size, shuffle=True)
     
     return train_loader, test_loader
-
-
-def freeze_sparse_gate(model: nn.Module):
-    # do not update all SparseGate
-    for sub_module in model.modules():
-        if isinstance(sub_module, models.common.SparseGate):
-            for p in sub_module.parameters():
-                # do not update SparseGate
-                p.requires_grad = False
             
                 
 def define_optim(model, bn_wd, lr, momentum, weight_decay): 
     if bn_wd:
-        no_wd_type = [models.common.SparseGate]
+        no_wd_type = []
     else:
         # do not apply weight decay on bn layers
-        no_wd_type = [models.common.SparseGate, nn.BatchNorm2d, nn.BatchNorm1d]
+        no_wd_type = [nn.BatchNorm2d, nn.BatchNorm1d]
 
     no_wd_params = []  # do not apply weight decay on these parameters
     for module_name, sub_module in model.named_modules():
@@ -115,21 +104,6 @@ def bn_weights(model):
             bias.append((name, m.bias.data))
 
     return weights, bias
-    pass
-
-
-# def adjust_learning_rate(optimizer, epoch, gammas, schedule, config):
-#     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-#     lr = config.get('lr')
-#     assert len(gammas) == len(schedule), "length of gammas and schedule should be equal"
-#     for (gamma, step) in zip(gammas, schedule):
-#         if epoch >= step:
-#             lr = lr * gamma
-#         else:
-#             break
-#     for param_group in optimizer.param_groups:
-#         param_group['lr'] = lr
-#     return lr
 
 
 # additional subgradient descent on the sparsity-induced penalty term
@@ -147,11 +121,8 @@ def updateBN(config, model):
 
 
 def clamp_bn(model, lower_bound=0, upper_bound=1):
-    if model.gate:
-        sparse_modules = list(filter(lambda m: isinstance(m, SparseGate), model.modules()))
-    else:
-        sparse_modules = list(
-            filter(lambda m: isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d), model.modules()))
+    sparse_modules = list(
+        filter(lambda m: isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d), model.modules()))
 
     for m in sparse_modules:
         m.weight.data.clamp_(lower_bound, upper_bound)
@@ -232,7 +203,6 @@ def bn_sparsity(model, loss_type, sparsity, t, alpha,
 
 def train(model, epoch, train_loader, optimizer, lr_scheduler, config, history_score, global_step):
     model.train()
-    #global history_score, global_step 
     avg_loss = 0.
     avg_sparsity_loss = 0.
     train_acc = 0.
@@ -334,23 +304,9 @@ def save_checkpoint(state, is_best, filepath, backup: bool, backup_path: str, ep
                 else:
                     break
 
-def prune_while_training(model: nn.Module, arch: str, prune_mode: str, num_classes: int):
-        saved_model_grad = prune(num_classes=num_classes, sparse_model=model, prune_mode=prune_mode,
-                                     sanity_check=False, pruning_strategy='grad')
-        saved_model_fixed = prune(num_classes=num_classes, sparse_model=model, prune_mode=prune_mode,
-                                      sanity_check=False, pruning_strategy='fixed')
-        baseline_model = lenet5_linear(gate=False)
-
-        saved_flops_grad = compute_conv_flops(saved_model_grad, cuda=True)
-        saved_flops_fixed = compute_conv_flops(saved_model_fixed, cuda=True)
-        baseline_flops = compute_conv_flops(baseline_model, cuda=True)
-
-        return saved_flops_grad, saved_flops_fixed, baseline_flops
-
 def fit_model(config): 
     config['cuda'] = not config.get('no_cuda') and torch.cuda.is_available()
     config['loss'] = LossType.from_string(config.get('loss'))
-    #config.get('decay_epoch') = sorted([int(config.get('epochs') * i if i < 1 else i) for i in config.get('decay_epoch')])
     if not config.get('seed'):
         config['seed'] = random.randint(500, 1000)
         
@@ -358,23 +314,9 @@ def fit_model(config):
     repr_and_saves(config.get('seed'), config.get('cuda'), config.get('log'), config.get('save'), config.get('backup'))
 
     train_loader, test_loader = get_loaders(config.get('batch_size'), config.get('test_batch_size'))
-    num_classes = 10 
+    num_classes = config.get('num_classes')
     
-    
-    if not config.get('retrain'):
-        model = lenet5_linear(gate=config.get('gate'), bn_init_value=config.get('bn_init_value'))
-    # else:  # initialize model for retraining with configs
-    #     checkpoint = torch.load(config.get('retrain'))
-    #     if config.get('arch') == "leNet":
-    #         model = models.__dict__[config.get('arch')](num_classes=num_classes, cfg=checkpoint['cfg'])
-    #     else:
-    #         raise NotImplementedError(f"Do not support {config.get('arch')} for retrain.")
-        
-    if config.get('fix_gate'):
-        if config.get('lbd') != 0:
-            raise ValueError("The lambda must be 0 in fix-gate mode.")
-        # do not update all SparseGate
-        freeze_sparse_gate(model)
+    model = lenet5(cfg = config.get('cfg'), bn_init_value=config.get('bn_init_value'), num_classes = num_classes)
         
     optimizer = define_optim(model, config.get('bn_wd'), config.get('lr'), config.get('momentum'), config.get('weight_decay'))
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, 100, eta_min=0.0, last_epoch=-1, verbose='deprecated')
@@ -387,11 +329,7 @@ def fit_model(config):
     for epoch in range(config.get('start_epoch', 0), config.get('epochs')):
         if config.get('max_epoch') is not None and epoch >= config.get('max_epoch'):
             break
-
-        #current_learning_rate = adjust_learning_rate(optimizer, epoch, config.get('gammas'), config.get('decay_epoch'), config)
         print("Start epoch {}/{}...".format(epoch, config.get('epochs')))
-
-        #weights, bias = bn_weights(model)
         
         weights, bias = bn_weights(model)
         for bn_name, bn_weight in weights:
@@ -402,10 +340,6 @@ def fit_model(config):
         for name, sub_modules in model.named_modules():
             if isinstance(sub_modules, nn.Conv2d):
                 writer.add_histogram("conv_kernels/" + name, sub_modules.weight, global_step=epoch)
-        if config['gate']:
-            for gate_name, m in model.named_modules():
-                if isinstance(m, SparseGate):
-                    writer.add_histogram("gate/" + gate_name, m.weight, global_step=epoch)
 
         
         history_score, global_step = train(model, epoch, train_loader, optimizer, lr_scheduler, config, history_score, global_step)
@@ -413,8 +347,8 @@ def fit_model(config):
         prec1 = test(model, test_loader, config)
         history_score[epoch][2] = prec1
         np.savetxt(os.path.join(config.get('save'), 'record.txt'), history_score, fmt='%10.5f', delimiter=',')
-        is_best = prec1 > best_prec1
-        best_prec1 = max(prec1, best_prec1)
+        is_best = prec1 > best_prec1  
+
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
@@ -428,7 +362,7 @@ def fit_model(config):
             config = config
         )
         
-        
+        #if counter > patience: 
         # write the tensorboard
         writer.add_scalar("train/average_loss", history_score[epoch][0], epoch)
         writer.add_scalar("train/sparsity_loss", history_score[epoch][3], epoch)
@@ -437,29 +371,6 @@ def fit_model(config):
         writer.add_scalar("val/acc", prec1, epoch)
         writer.add_scalar("val/best_acc", best_prec1, epoch)
 
-
-        # flops
-        # if config.get('loss') in {LossType.POLARIZATION, LossType.L2_POLARIZATION}:
-        #     flops_grad, flops_fixed, baseline_flops = prune_while_training(model, arch=config.get('arch'),
-        #                                                                 prune_mode="default",
-        #                                                                 num_classes=num_classes)
-        #     print(f" --> FLOPs in epoch (grad) {epoch}: {flops_grad:,}, ratio: {flops_grad / baseline_flops}")
-        #     print(f" --> FLOPs in epoch (fixed) {epoch}: {flops_fixed:,}, ratio: {flops_fixed / baseline_flops}")
-        #     if config.get('loss') == LossType.POLARIZATION and config.get('target_flops') and (
-        #             flops_grad / baseline_flops) <= config.get('target_flops') and config.get('gate'):
-        #         print("The grad pruning FLOPs archieve the target FLOPs.")
-        #         print(f"Current pruning ratio: {flops_grad / baseline_flops}")
-        #         print("Stop polarization from current epoch and continue training.")
-
-        #         # do not apply polarization loss
-        #         config['lbd'] = 0
-        #         freeze_sparse_gate(model)
-        #         if config.get('backup_freq') > 20:
-        #             config['backup_freq'] = 20
-
-    # if config.get('loss') == LossType.POLARIZATION and config.get('target_flops') and (
-    #         flops_grad / baseline_flops) > config.get('target_flops') and config.get('gate'):
-    #     print("WARNING: the FLOPs does not achieve the target FLOPs at the end of training.")
     print("Best accuracy: " + str(best_prec1))
     history_score[-1][0] = best_prec1
     np.savetxt(os.path.join(config.get('save'), 'record.txt'), history_score, fmt='%10.5f', delimiter=',')
@@ -468,4 +379,4 @@ def fit_model(config):
 
     print("Best accuracy: " + str(best_prec1))    
     #print(model.load_state_dict())
-    return(best_prec1)
+    return(best_prec1, model)

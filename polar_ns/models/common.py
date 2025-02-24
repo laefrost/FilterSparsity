@@ -116,18 +116,18 @@ class Identity(torch.nn.Module):
         return input
 
 
-class BuildingBlock(nn.Module):
-    def do_pruning(self, in_channel_mask: np.ndarray, pruner: Callable[[np.ndarray], float], prune_mode: str):
-        pass
+# class BuildingBlock(nn.Module):
+#     def do_pruning(self, in_channel_mask: np.ndarray, pruner: Callable[[np.ndarray], float], prune_mode: str):
+#         pass
 
-    def get_conv_flops_weight(self, update: bool, scaling: bool) -> typing.Iterable:
-        pass
+#     def get_conv_flops_weight(self, update: bool, scaling: bool) -> typing.Iterable:
+#         pass
 
-    def get_sparse_modules(self) -> typing.Iterable:
-        pass
+#     def get_sparse_modules(self) -> typing.Iterable:
+#         pass
 
-    def config(self) -> typing.Iterable[int]:
-        pass
+#     def config(self) -> typing.Iterable[int]:
+#         pass
 
 
 def l1_norm_threshold(weight: np.ndarray, ratio) -> np.ndarray:
@@ -149,17 +149,12 @@ def l1_norm_threshold(weight: np.ndarray, ratio) -> np.ndarray:
 
 def prune_conv_layer(conv_layer: Union[nn.Conv2d, nn.Linear],
                      bn_layer: nn.BatchNorm2d,
-                     sparse_layer: Union[nn.BatchNorm2d, SparseGate],
+                     sparse_layer: Union[nn.BatchNorm2d],
                      in_channel_mask: np.ndarray,
                      prune_output_mode: str,
                      pruner: Callable[[np.ndarray], float],
-                     prune_mode: str,
-                     sparse_layer_in: typing.Optional[SparseGate] = None,
                      prune_on="factor") -> typing.Tuple[np.ndarray, np.ndarray]:
     """
-    Note: if the sparse_layer is SparseGate, the gate will be replaced by BatchNorm
-    scaling factor. The value of the gate will be set to all ones.
-
     :param prune_output_mode: how to handle the output channel (case insensitive)
         "keep": keep the output channel intact
         "same": keep the output channel as same as input channel
@@ -169,63 +164,20 @@ def prune_conv_layer(conv_layer: Union[nn.Conv2d, nn.Linear],
     :param bn_layer: the BatchNorm layer after the convolution layer
     :param conv_layer: the convolution layer to be pruned
     :param sparse_layer: the layer to determine the sparsity. Support BatchNorm2d and SparseGate.
-    :param prune_mode: pruning mode (`str`), case-insensitive:
-        - `"multiply"`: pruning threshold is determined by the multiplication of `sparse_layer` and `bn_layer`
-            only available when `sparse_layer` is `SparseGate`
-        - `None` or `"default"`: default behaviour. The pruning threshold is determined by `sparse_layer`
     :param prune_on: 'factor' or 'weight'.
-    :param sparse_layer_in: the layer to determine the input sparsity. Support BatchNorm2d and SparseGate.
-        When the `sparse_layer_in` is None, there is no input sparse layers,
-        the input channel will be determined by the `in_channel_mask`
-        Note: `in_channel_mask` is CONFLICT with `sparse_layer_in`!
     :return out_channel_mask
     """
     assert isinstance(conv_layer, nn.Conv2d) or isinstance(conv_layer, nn.Linear), f"conv_layer got {conv_layer}"
 
     assert isinstance(sparse_layer, nn.BatchNorm2d) or \
-           isinstance(sparse_layer, nn.BatchNorm1d) or isinstance(sparse_layer, SparseGate), \
+           isinstance(sparse_layer, nn.BatchNorm1d), \
         f"sparse_layer got {sparse_layer}"
 
-    if in_channel_mask is not None and sparse_layer_in is not None:
-        raise ValueError("Conflict option: in_channel_mask and sparse_layer_in")
-
-    prune_mode = prune_mode.lower()
     prune_output_mode = str.lower(prune_output_mode)
-
-    if prune_mode == 'multiply':
-        if bn_layer is None:
-            raise ValueError("Could not use multiply mode when bn is None")
-        if not isinstance(sparse_layer, SparseGate):
-            raise ValueError(f"Do not support prune_mode {prune_mode} when the sparse_layer is {sparse_layer}")
 
     with torch.no_grad():
         conv_weight: torch.Tensor = conv_layer.weight.data.clone()
-
-        # prune the input channel of the conv layer
-        # if sparse_layer_in and in_channel_mask are both None, the input dim will NOT be pruned
-        # if sparse_layer_in is not None:
-        #     if in_channel_mask is not None:
-        #         raise ValueError("")
-        #     sparse_weight_in: np.ndarray = sparse_layer_in.weight.view(-1).data.cpu().numpy()
-        #     # the in_channel_mask will be overwrote
-        #     input_threshold = pruner(sparse_weight_in)
-        #     in_channel_mask: np.ndarray = sparse_weight_in > input_threshold
-
-        # # convert mask to channel indexes
-        # idx_in = np.squeeze(np.argwhere(np.asarray(in_channel_mask)))
-        # if len(idx_in.shape) == 0:
-        #     # expand the single scalar to array
-        #     idx_in = np.expand_dims(idx_in, 0)
-        
-        # prune the input channel of the conv layer
-        # if sparse_layer_in and in_channel_mask are both None, the input dim will NOT be pruned
-        if sparse_layer_in is not None:
-            if in_channel_mask is not None:
-                raise ValueError("")
-            sparse_weight_in: np.ndarray = sparse_layer_in.weight.view(-1).data.cpu().numpy()
-            # the in_channel_mask will be overwrote
-            in_channel_mask = pruner(sparse_weight_in)
-
+        out_channel_mask = None
         if in_channel_mask is not None:
             # prune the input channel according to the in_channel_mask
             # convert mask to channel indexes
@@ -233,115 +185,83 @@ def prune_conv_layer(conv_layer: Union[nn.Conv2d, nn.Linear],
             if len(idx_in.shape) == 0:
                 # expand the single scalar to array
                 idx_in = np.expand_dims(idx_in, 0)
+                idx_in_to_zero = torch.empty((0), dtype=torch.float32)
             elif len(idx_in.shape) == 1 and idx_in.shape[0] == 0:
                 # nothing left, prune the whole block
                 out_channel_mask = np.full(conv_layer.out_channels, False)
-                return in_channel_mask, out_channel_mask
-
-        # prune the input of the conv layer
-        if isinstance(conv_layer, nn.Conv2d):
-            if conv_layer.groups == 1:
-                conv_weight = conv_weight[:, idx_in.tolist(), :, :]
+                idx_in_to_zero = np.squeeze(np.argwhere(~np.asarray(in_channel_mask)))
+            else: 
+                idx_in_to_zero = np.squeeze(np.argwhere(~np.asarray(in_channel_mask)))
+                
+            # prune the input of the conv layer
+            if isinstance(conv_layer, nn.Conv2d):
+                if conv_layer.groups == 1:
+                    #conv_weight = conv_weight[:, idx_in.tolist(), :, :]
+                    conv_weight[:, idx_in_to_zero.tolist(), :, :] = 0
+                else:
+                    assert conv_weight.shape[1] == 1, "only works for groups == num_channels"
+            elif isinstance(conv_layer, nn.Linear):
+                #conv_weight = conv_weight[:, idx_in.tolist()]
+                conv_weight[:, idx_in_to_zero.tolist()] = 0
             else:
-                assert conv_weight.shape[1] == 1, "only works for groups == num_channels"
-        elif isinstance(conv_layer, nn.Linear):
-            conv_weight = conv_weight[:, idx_in.tolist()]
-        else:
-            raise ValueError(f"unsupported conv layer type: {conv_layer}")
+                raise ValueError(f"unsupported conv layer type: {conv_layer}")
 
-        # prune the output channel of the conv layer
-        if prune_output_mode == "prune":
-            if prune_on == 'factor':
-                # the sparse_layer.weight need to be flatten, because the weight of SparseGate is not 1d
-                sparse_weight: np.ndarray = sparse_layer.weight.view(-1).data.cpu().numpy()
-                # Use abs. weigths: 
-                sparse_weight = np.abs(sparse_weight)
-                if prune_mode == 'multiply':
-                    bn_weight = bn_layer.weight.data.cpu().numpy()
-                    sparse_weight = sparse_weight * bn_weight  # element-wise multiplication
-                    pass
-                elif prune_mode != 'default':
-                    raise ValueError(f"Do not support prune_mode {prune_mode}")
+        if out_channel_mask is None: 
+            # prune the output channel of the conv layer
+            if prune_output_mode == "prune":
+                if prune_on == 'factor':
+                    sparse_weight: np.ndarray = sparse_layer.weight.view(-1).data.cpu().numpy()
+                    # Use abs. weigths: 
+                    sparse_weight = np.abs(sparse_weight)
+                    output_threshold = pruner(sparse_weight)
+                    out_channel_mask: np.ndarray = sparse_weight > output_threshold
+                elif prune_on == "weight":
+                    out_channel_mask: np.ndarray = pruner(conv_weight.data.cpu().numpy())
+                else: # for PEFC
+                    l1_norms_layer = torch.sum(torch.abs(conv_weight.data), dim=(1, 2, 3))
+                    l1_norms_layer = l1_norms_layer.cpu().numpy()
+                    output_threshold = pruner(l1_norms_layer)
+                    out_channel_mask: np.ndarray = l1_norms_layer > output_threshold
 
-                # prune according the bn layer
-                output_threshold = pruner(sparse_weight)
-                print('output_threshold in pruning: {output_threshold}')
-                out_channel_mask: np.ndarray = sparse_weight > output_threshold
+            elif prune_output_mode == "keep":
+                # do not prune the output
+                out_channel_mask = np.ones(conv_layer.out_channels)
+            elif prune_output_mode == "same":
+                # prune the output channel with the input mask
+                # keep the conv layer in_channel == out_channel
+                out_channel_mask = in_channel_mask
             else:
-                sparse_weight: np.ndarray = sparse_layer.weight.view(-1).data.cpu().numpy()
-                # in this case, the sparse weight should be the conv or linear weight
-                out_channel_mask: np.ndarray = pruner(conv_weight.data.cpu().numpy())
-
-        elif prune_output_mode == "keep":
-            # do not prune the output
-            out_channel_mask = np.ones(conv_layer.out_channels)
-        elif prune_output_mode == "same":
-            # prune the output channel with the input mask
-            # keep the conv layer in_channel == out_channel
-            out_channel_mask = in_channel_mask
-        else:
-            raise ValueError(f"invalid prune_output_mode: {prune_output_mode}")
-
-        if not np.any(out_channel_mask):
-            # there is no channel left
-            return out_channel_mask, in_channel_mask
+                raise ValueError(f"invalid prune_output_mode: {prune_output_mode}")
 
         idx_out: np.ndarray = np.squeeze(np.argwhere(np.asarray(out_channel_mask)))
+        idx_to_zero = np.squeeze(np.argwhere(~out_channel_mask))
         if len(idx_out.shape) == 0:
-            # 0-d scalar
             idx_out = np.expand_dims(idx_out, 0)
+            idx_to_zero = np.expand_dims(idx_to_zero, 0)
 
         if isinstance(conv_layer, nn.Conv2d):
-            conv_weight = conv_weight[idx_out.tolist(), :, :, :]
+            conv_weight[idx_to_zero, :, :, :] = 0
+            conv_layer.weight.data = conv_weight
         elif isinstance(conv_layer, nn.Linear):
-            conv_weight = conv_weight[idx_out.tolist(), :]
-            linear_bias = conv_layer.bias.clone()
-            linear_bias = linear_bias[idx_out.tolist()]
+            conv_weight[idx_to_zero, :] = 0
+            if conv_layer.bias is not None:
+                conv_layer.bias[idx_to_zero] = 0
+            conv_layer.weight.data = conv_weight
         else:
             raise ValueError(f"unsupported conv layer type: {conv_layer}")
-
-        # change the property of the conv layer
-        if isinstance(conv_layer, nn.Conv2d):
-            conv_layer.in_channels = len(idx_in)
-            conv_layer.out_channels = len(idx_out)
-        elif isinstance(conv_layer, nn.Linear):
-            conv_layer.in_features = len(idx_in)
-            conv_layer.out_features = len(idx_out)
-        conv_layer.weight.data = conv_weight
-        if isinstance(conv_layer, nn.Linear):
-            conv_layer.bias.data = linear_bias
-        if isinstance(conv_layer, nn.Conv2d) and conv_layer.groups != 1:
-            # set the new groups for dw layer (for MobileNet)
-            conv_layer.groups = conv_layer.in_channels
-            pass
 
         # prune the bn layer
         if bn_layer is not None:
-            bn_layer.weight.data = bn_layer.weight.data[idx_out.tolist()].clone()
-            bn_layer.bias.data = bn_layer.bias.data[idx_out.tolist()].clone()
-            bn_layer.running_mean = bn_layer.running_mean[idx_out.tolist()].clone()
-            bn_layer.running_var = bn_layer.running_var[idx_out.tolist()].clone()
-
-            # set bn properties
-            bn_layer.num_features = len(idx_out)
-
-        # prune the gate
-        if isinstance(sparse_layer, SparseGate):
-            sparse_layer.prune(idx_out)
-            # multiply the bn weight and SparseGate weight
-            sparse_weight: torch.Tensor = sparse_layer.weight.view(-1)
-            if bn_layer is not None:
-                bn_layer.weight.data = (bn_layer.weight.data * sparse_weight).clone()
-                bn_layer.bias.data = (bn_layer.bias.data * sparse_weight).clone()
-            # the function of the SparseGate is now replaced by bn layers
-            # the SparseGate should be disabled
-            sparse_layer.set_ones()
+            bn_layer.weight.data[idx_to_zero] = 0
+            bn_layer.bias.data[idx_to_zero] = 0
+            bn_layer.running_mean[idx_to_zero] = 0
+            bn_layer.running_var[idx_to_zero] = 0
 
     return out_channel_mask, in_channel_mask
 
 
 def search_threshold(weight: np.ndarray, alg: str):
-    if alg not in ["fixed", "grad", "search"]:
+    if alg not in ["fixed", "grad", "search", "cutoff"]:
         raise NotImplementedError()
 
     hist_y, hist_x = np.histogram(weight, bins=100, range=(0, 1))
@@ -357,6 +277,8 @@ def search_threshold(weight: np.ndarray, alg: str):
                 return threshold
     elif alg == "fixed":
         return hist_x[1]
+    elif alg == "cutoff": 
+        return 0.05
 
 
 def compute_conv_flops_weight(model: nn.Module, building_block, input_size: typing.Tuple[int, int] = (32, 32),

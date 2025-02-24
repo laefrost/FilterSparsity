@@ -20,7 +20,7 @@ import polar_ns.models as models
 from polar_ns.common import LossType, compute_conv_flops
 from polar_ns.models.common import SparseGate, Identity
 from polar_ns.models.pytorch_lenet5 import LeNet5
-from polar_ns.models.pytorch_lenet5 import LeNet5, lenet5_linear, lenet5
+from polar_ns.models.pytorch_lenet5 import LeNet5, lenet5
 
 
 
@@ -224,7 +224,7 @@ def save_checkpoint(state, is_best, filepath, config):
 
 
 def calculate_flops(current_model, num_classes = 10):
-    model_ref = lenet5_linear(gate=False)
+    model_ref = lenet5()
 
     current_flops = compute_conv_flops(current_model.cpu())
     ref_flops = compute_conv_flops(model_ref.cpu())
@@ -247,8 +247,7 @@ def fine_tune_model(config):
     
     if config.get('refine'):
         checkpoint = torch.load(config.get('refine'))
-        model = lenet5_linear(gate=False,
-                            cfg=checkpoint['cfg'], )
+        model = lenet5(cfg=checkpoint['cfg'])
         model.load_state_dict(checkpoint['state_dict'])
     else:
         raise ValueError("--refine is required to fine-tune.")
