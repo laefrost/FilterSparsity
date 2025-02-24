@@ -17,14 +17,17 @@ The scripts for PP, NS and PEFC can be found in ```polar_ns_modelling```. The OT
     - For PP:
       ```{python}
       'pruning_type': 'polarization', 
-      'pruning_strategy' : 'grad', # 'cutoff' for fixed cutoff (0.05), 'fixed' for the first histogram bin as cutoff```
+      'pruning_strategy' : 'grad', # 'cutoff' for fixed cutoff (0.05), 'fixed' for the first histogram bin as cutoff
+      ```
     - For NS:
-    - ```{python}
+     ```{python}
       'pruning_type': 'ns',
       'pruning_strategy' : 'l1_ratio',
-      'pruning_hp': cutoff  # cutoff as sparsity controlling parameter```
+      'pruning_hp': cutoff  # cutoff as sparsity controlling parameter
+     ```
     - For PEFC:
       ```{python}
       'pruning_type': 'pefc',
       'pruning_strategy' : 'num_steps',
-      'pruning_hp' : pruning_steps   # pruning_steps as sparsity controlling parameter```
+      'pruning_hp' : pruning_steps   # pruning_steps as sparsity controlling parameter
+      ```
