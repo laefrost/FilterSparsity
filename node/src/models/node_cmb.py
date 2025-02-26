@@ -197,8 +197,9 @@ class NODECMB(tf.keras.Model):
                  tree_depth = 1,
                  threshold_init_beta = 1,
                  la_trees = 0,
-                 la_layers = 0, 
-                 bn = None, ensemble = None, ovp = True, seed = 123, **kwargs):
+                 #la_layers = 0, 
+                 #bn = None, ensemble = None, 
+                 ovp = True, seed = 123, **kwargs):
 
         super(NODECMB, self).__init__(**kwargs)
         self.units = units
@@ -207,7 +208,7 @@ class NODECMB(tf.keras.Model):
         self.tree_depth = tree_depth
         self.threshold_init_beta = threshold_init_beta
         self.la_trees = la_trees
-        self.la_layers = la_layers
+        #self.la_layers = la_layers
         self.bn = tf.keras.layers.BatchNormalization()
         self.concat_tree = tf.keras.layers.Concatenate()
         self.ovp = ovp
@@ -248,7 +249,7 @@ class NODECMB(tf.keras.Model):
         layers_output = []
         for l, layer in enumerate(self.ensemble):
             h = layer(x)
-            if self.ovp == True and self.la_trees >= 0 or self.ovp == False and self.la_trees > 0:
+            if self.ovp == True and self.la_trees > 0:
                 h_t = tf.transpose(h, [0, 2, 1])
                 trees_output = []
                 for t, dense in enumerate(self.trees_per_layer[l]):
@@ -260,8 +261,8 @@ class NODECMB(tf.keras.Model):
             else: 
                 h = tf.reduce_mean(h, axis = 1)
             
-            if self.la_layers > 0:             
-                h = self.dense_regu_layers[l](h)
+            # if self.la_layers > 0:             
+            #     h = self.dense_regu_layers[l](h)
             
             layers_output.append(h)
             x = tf.concat([x, h], axis=1)
