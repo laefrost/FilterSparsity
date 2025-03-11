@@ -36,10 +36,10 @@ class SparseConvBlock(nn.Module):
 
     def forward(self, x):
         conv_out = self.conv(x)
-        bn_out = self.batch_norm(conv_out)
-        relu_out = self.relu(bn_out)
+        relu_out = self.relu(conv_out)
+        bn_out = self.batch_norm(relu_out)
 
-        return relu_out
+        return bn_out
 
     def __repr__(self):
         return f"SparseConvBlock(channel_num={self.output_channel}, " \
