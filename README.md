@@ -6,7 +6,7 @@ Implementation of the filter sparsity methods [Only Train Once (OTO)](https://ar
 The code for NS and Polarization Pruning for LeNet5 was built/adapted based on the [official implementation](https://github.com/polarizationpruning/PolarizationPruning/tree/master) of these methods. 
 
 ## Functionality
-The scripts for PP, NS and PEFC can be found in ```polar_ns_modelling```. The OTO Notebook (created in Google Colab) can be found in ```oto_modelling```.
+The scripts for PP, NS and PEFC can be found in ```polar_ns_modelling```. The OTO Notebook (created in Google Colab) can be found in ```oto_modelling```. The code for plotting the results can be found in ```polar_ns_modelling/analysis_and_plots.ipynb``` and in ```node/eval_final.ipynb``` respectivley.
 
 ### Running PP, NS and PEFC: 
 1. Training: Set params in ```load_config_train()```:
