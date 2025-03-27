@@ -1,0 +1,6 @@
+,method,cutoff,ps,acc,baseline_flops,remaining_flops,nmb_params_before,nmb_params_after
+0,pefc_independent,Dynamic,0,0.9113,416520,416520,2550,2550
+1,pefc_independent,Dynamic,1,0.8965,416520,356920,2550,2125
+2,pefc_independent,Dynamic,2,0.726,416520,237720,2550,1275
+3,pefc_independent,Dynamic,3,0.1814,416520,58120,2550,100
+4,pefc_independent,Dynamic,4,0.1,416520,10920,2550,0
